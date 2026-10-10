@@ -525,7 +525,53 @@ def call_model_for_dockerfile_with_fallback(task_data: Dict, available_files: Li
     if verbose:
         print(f"{YELLOW}Generating minimal fallback Dockerfile...{RESET}")
     
-    minimal_dockerfile = f"""FROM ubuntu:20.04
+    category = task_data.get("category", "").lower() if task_data.get("category") else "misc"
+    has_php = any(f.endswith('.php') for f in available_files)
+    has_html = any(f.endswith(('.html', '.htm')) for f in available_files)
+    has_py = any(f.endswith('.py') for f in available_files)
+    task_name = task_data.get("task_name", "challenge")
+    fallback_flag = f"pwn.college{{{task_name}_flag}}"
+
+    if category == "web" or has_php or has_html:
+        if has_php:
+            minimal_dockerfile = f"""FROM php:7.4-cli-alpine
+
+WORKDIR /challenge
+
+COPY . /challenge/
+
+ENV FLAG="{fallback_flag}"
+
+EXPOSE 8080
+
+CMD ["php", "-S", "0.0.0.0:8080", "-t", "/challenge"]"""
+        elif has_py:
+            entry_script = "app.py" if any(f == "app.py" for f in available_files) else (
+                "server.py" if any(f == "server.py" for f in available_files) else available_files[0]
+            )
+            minimal_dockerfile = f"""FROM python:3.10-slim
+
+WORKDIR /challenge
+
+COPY . /challenge/
+
+RUN pip install --no-cache-dir flask requests 2>/dev/null || true
+
+ENV FLAG="{fallback_flag}"
+
+EXPOSE 8080
+
+CMD ["python3", "{entry_script}"]"""
+        else:
+            minimal_dockerfile = f"""FROM nginx:alpine
+
+COPY . /usr/share/nginx/html/
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]"""
+    else:
+        minimal_dockerfile = f"""FROM ubuntu:20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -791,15 +837,19 @@ def call_model_for_docker_compose(task_data: Dict, dockerfile_content: str, avai
         except Exception as e:
             # Don't retry on BadRequestError (e.g., wrong provider) - it won't fix itself
             error_str = str(e)
-            if "BadRequestError" in error_str or "LLM Provider NOT provided" in error_str:
+            if "BadRequestError" in error_str or "LLM Provider NOT provided" in error_str or attempt == max_retries - 1:
                 if verbose:
-                    print(f"Fatal error: {e}. Stopping retries.")
-                return ""
-            
-            if attempt == max_retries - 1:
-                if verbose:
-                    print(f"Error: Model call failed for docker-compose generation after {max_retries} attempts: {e}")
-                return ""
+                    print(f"Generating fallback local docker-compose.yml: {e}")
+                import re
+                port_match = re.search(r'EXPOSE\s+(\d+)', dockerfile_content)
+                exposed_port = port_match.group(1) if port_match else "8080"
+                return f"""services:
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "{exposed_port}:{exposed_port}"
+"""
             import time
             wait_time = 2 ** attempt
             time.sleep(wait_time)
@@ -944,8 +994,21 @@ def generate_challenge_json(task_data: Dict, task_files: List[str], server_neede
     challenge_json = call_model_for_challenge_json(task_data, task_files, server_needed, docker_compose_content, model, max_retries, verbose)
     if not challenge_json:
         if verbose:
-            print(f"Failed to generate challenge.json for {task_data.get('task_name', 'unknown')}")
-        return {}
+            print(f"Generating fallback challenge.json for {task_data.get('task_name', 'unknown')}")
+        clean_files = [f for f in task_files if not any(f.lower().endswith(x) for x in ['.md', '.sha256', '.init'])]
+        challenge_json = {
+            "name": task_data.get("task_name", "challenge"),
+            "description": task_data.get("description", "").strip(),
+            "category": task_data.get("category", "web"),
+            "files": clean_files,
+            "compose": bool(docker_compose_content.strip()),
+            "box": "web" if server_needed else "",
+            "internal_port": "8080" if server_needed else "",
+        }
+        if parsed_flag:
+            challenge_json["flag"] = parsed_flag
+        elif not task_data.get("has_sha256_file"):
+            challenge_json["flag"] = f"pwn.college{{{task_data.get('task_name', 'challenge')}_flag}}"
 
     # Always set category from task_data mapping
     category = task_data.get("category")

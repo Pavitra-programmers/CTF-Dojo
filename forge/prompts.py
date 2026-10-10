@@ -91,7 +91,7 @@ Use the .init content to inform your Dockerfile generation - execute any setup c
 6. Use WORKDIR to organize files properly
 7. Expose only the necessary port for the challenge
 8. Use specific CMD/ENTRYPOINT that matches the challenge type
-9. You MUST create a `run.sh` wrapper script using printf or echo commands (DO NOT use heredoc syntax like << 'EOF')
+9. For binary/pwn challenges, wrap executable in a `run.sh` wrapper script using printf or echo commands. For web challenges (PHP, Node, Python, Nginx), start the web server directly in the foreground in CMD/ENTRYPOINT.
 10. If `.init` file is provided and you tend to run it in the Dockerfile, you MUST use `RUN`  with `|| true` to avoid build failure
 
 # CRITICAL SCRIPT CREATION SYNTAX:
@@ -220,7 +220,7 @@ WRAPPER_64BIT = '''- **MANDATORY**: ALL executable files (binaries, scripts, etc
 - Always chmod +x the run.sh script after creating it
 - Then use socat to host the service: `CMD ["socat", "TCP-LISTEN:1337,reuseaddr,fork", "EXEC:/challenge/run.sh"]`'''
 
-DOCKER_COMPOSE_GENERATION_PROMPT = '''Based on the following CTF challenge information and generated Dockerfile, create a docker-compose.yml file with an appropriate ctfnet alias.
+DOCKER_COMPOSE_GENERATION_PROMPT = '''Based on the following CTF challenge information and generated Dockerfile, create a standalone docker-compose.yml file.
 
 # Challenge Name:
 {task_name}
@@ -239,19 +239,10 @@ Generated Dockerfile:
 
 Requirements:
 1. Use "build: ." to build from the local Dockerfile
-2. Extract the exposed port from the Dockerfile and map it appropriately
-3. Connect to the "ctfnet" external network
-4. Generate a meaningful, DNS-compliant alias for this specific challenge
-5. The alias should be memorable and related to the challenge name/theme
-6. Use format like: challengename.ctf.io or similar creative naming
-7. Avoid generic names like "web.chal.custom.io"
-8. Use the challenge information to create a relevant alias
-
-Example good aliases:
-- showdown.csaw.io
-- cryptochallenge.picoctf.io  
-- webshell.defcon.io
-- bufferoverflow.ctf.io
+2. Extract the exposed port from the Dockerfile and map it directly to localhost (e.g. "8080:8080", "8000:8000", "3000:3000", or "1337:1337") so players can access it directly on their host machine
+3. Use a standard standalone docker-compose.yml with "restart: unless-stopped"
+4. DO NOT use external networks (such as ctfnet) - use the default bridge network so it runs directly with `docker compose up -d` on any local machine
+5. If the challenge uses environment variables (such as FLAG), include them under environment
 
 Generate a complete docker-compose.yml. Respond with ONLY the docker-compose.yml content, no explanations.'''
 

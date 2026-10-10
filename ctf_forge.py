@@ -33,6 +33,12 @@ import tarfile
 import tempfile
 import litellm
 import sys
+
+# Ensure UTF-8 output on Windows consoles
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 from forge.analysis import (
     analyze_executable_content,
     detect_elf_architecture,
@@ -58,6 +64,7 @@ from forge.validators import (
     remove_duplicate_docker_setup,
     check_dockerfile_file_existence,
     fix_dockerfile_in_place,
+    _expand_dockerfile_source_pattern,
 )
 from forge.generation import (
     generate_challenge_json,
@@ -296,9 +303,14 @@ def process_task(task_data: Dict, create_docker_compose: bool = True, model: str
         
         category = task_data.get("category", "").lower() if task_data.get("category") else "misc"
         
-
+        # Web challenges ALWAYS need a web server container for browsing
+        has_web_files = any(f.endswith(('.php', '.html', '.htm', '.js')) for f in task_files)
+        if category in ["web"] or has_web_files:
+            server_needed = True
+            if verbose:
+                print(f"{BLUE}=== Server needed (web challenge) ==={RESET}")
         # Check for own custom flag - if detected, server is never needed
-        if has_own_custom_flag:
+        elif has_own_custom_flag:
             server_needed = False
             if verbose:
                 print(f"{BLUE}=== Server not needed (has own custom flag) ==={RESET}")
@@ -316,11 +328,7 @@ def process_task(task_data: Dict, create_docker_compose: bool = True, model: str
             if verbose:
                 print(f"{BLUE}=== Server needed (no sha256 file and no check file) ==={RESET}")
         else:
-            # if task_data.get("category") in ["web", "pwn"]:
             server_needed = True
-            # else:
-            #     # Use model detection as fallback
-            #     server_needed = call_model_for_server_detection(task_data, model, max_retries, verbose)
         
         if verbose:
             print(f"{BLUE}=== Server needed: {server_needed} ==={RESET}")
@@ -686,30 +694,25 @@ def main():
     # Define the working directory
     ctf_archive_path = 'ctf-archive'
     
-    # Handle template copying and overwrite logic
-    if args.overwrite:
-        # Remove existing ctf-archive directory if it exists
-        if os.path.exists(ctf_archive_path):
+    # Handle template copying only if a separate template path is provided
+    if args.path != ctf_archive_path:
+        if args.overwrite and os.path.exists(ctf_archive_path):
             if args.verbose:
                 print(f"{YELLOW}Removing existing {ctf_archive_path} directory...{RESET}")
-            shutil.rmtree(ctf_archive_path)
-    
-    # Copy template to ctf-archive if it doesn't exist or if overwrite is specified
-    if not os.path.exists(ctf_archive_path) or args.overwrite:
-        if not os.path.exists(args.path):
-            print(f"{RED}Template directory not found: {args.path}{RESET}")
-            return
-        
-        if args.verbose:
-            print(f"{BLUE}Copying {args.path} to {ctf_archive_path}...{RESET}")
-        
-        try:
-            shutil.copytree(args.path, ctf_archive_path)
+            shutil.rmtree(ctf_archive_path, ignore_errors=True)
+        if not os.path.exists(ctf_archive_path) or args.overwrite:
+            if not os.path.exists(args.path):
+                print(f"{RED}Template directory not found: {args.path}{RESET}")
+                return
             if args.verbose:
-                print(f"{GREEN}Successfully copied template to {ctf_archive_path}{RESET}")
-        except Exception as e:
-            print(f"{RED}Failed to copy template: {e}{RESET}")
-            return
+                print(f"{BLUE}Copying {args.path} to {ctf_archive_path}...{RESET}")
+            try:
+                shutil.copytree(args.path, ctf_archive_path)
+                if args.verbose:
+                    print(f"{GREEN}Successfully copied template to {ctf_archive_path}{RESET}")
+            except Exception as e:
+                print(f"{RED}Failed to copy template: {e}{RESET}")
+                return
     
     # Check if ctf-archive directory exists
     if not os.path.exists(ctf_archive_path):

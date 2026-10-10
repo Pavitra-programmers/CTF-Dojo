@@ -1,0 +1,6 @@
+.env
+ctf-archive/
+__pycache__/
+*.pyc
+*.pyo
+sample_trajectory.json
