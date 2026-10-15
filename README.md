@@ -77,6 +77,59 @@ python find_writeups.py \
 
 - Run [EnIGMA+](https://github.com/amazon-science/Cyber-Zero/tree/main/enigma-plus) to collect trajectories from CTF-Dojo challenges.
 
+## Running Challenges with Openrind Browser Pods
+
+When evaluating web CTF challenges using Openrind / Claude Code via `agent-browser` (where Chromium runs inside an isolated `openrind-browser-pod` container in WSL2):
+
+### 1. Start the Target CTF Challenge
+
+Navigate to the challenge directory on your host and launch it via Docker Compose:
+
+```bash
+cd ctf-archive/sekaictf2022/game
+docker compose up -d --build
+```
+
+Verify that the challenge is running on the host at `http://localhost:8080`.
+
+### 2. Forward `localhost:8080` into the Browser Pod
+
+Inside Openrind, Chromium runs in a separate Docker container (`openrind-browser-pod`). Inside that container, `localhost` refers to the container's own loopback interface rather than your host machine.
+
+To allow Claude and `agent-browser` to access `http://localhost:8080` directly, run the helper script:
+
+```powershell
+# On Windows PowerShell:
+.\bridge_browser_pod.ps1 8080
+
+# Or on Windows Command Prompt:
+bridge_browser_pod.bat 8080
+
+# Or in Git Bash / WSL:
+./bridge_browser_pod.sh 8080
+```
+
+*What this does:*
+- Automatically detects the host gateway IP (e.g. `172.18.32.1`).
+- Spawns a lightweight TCP relay inside `openrind-browser-pod` listening on `127.0.0.1:8080`.
+- Tunnels any HTTP/TCP request to `http://localhost:8080` out to the challenge running on port 8080 of your host.
+
+### 3. Interact via Claude Code / agent-browser
+
+Claude can now directly interact with the challenge using `agent-browser`:
+
+```bash
+# In Claude Code / agent sandbox:
+browser_start "http://localhost:8080"
+browser_snapshot
+```
+
+Or using the standard `agent-browser` CLI:
+```bash
+agent-browser --session web open http://localhost:8080
+agent-browser --session web snapshot -i
+```
+
 ## Citation
 
 If you use this benchmark suite in your research, please cite:
